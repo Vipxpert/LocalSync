@@ -5,7 +5,7 @@ I mostly use this for syncing Geometry Dash data and more. The code is clean and
 
 * Precaution!!
 1. Public your network can hinder security issues!
-2. While the app limits access to a most path. It still can be exploited in someway to mess with your files. I don't exactly know how it works.
+2. While the app limits access to a all path in the server.py. Someone may be able exploit HTTP's security to mess with your files.
 3. The app may use root! Which I'll try to eliminate later...
 
 What's the requirements to use this app?
@@ -13,15 +13,15 @@ What's the requirements to use this app?
 2. Some knowledge about shell scripts
 
 How to use this?
-1. Set-up packages and required softwares using the list below!
+1. Set-up packages and required softwares using the list below! Get and remember the ipv4 address of the devices you're going sync.
 2. Have the project unzipped on 2 or more devices.
 3. If it's Windows, run start.cmd. If it's Android, run start.sh. 
 4. Start run_server.sh. The session is now used to only host the HTTP server. Do it on both devices.
 5. Run a new session of start.sh / start.cmd.
 6. Run crud_database to add devices that you're going to interact with.
 7. Go back and choose file_sync_operation and sync files there!
-8. If there are features you want to change or add, tinker with the code yourself. Enjoy!
-
+8. If there are features you want to change or add, tinker with the code yourself. It's pretty intuitive. Enjoy!
+*Many weird cases has been accounted for but it's recommeded that you follow along...
 
 How to set-up? 
 For mobile

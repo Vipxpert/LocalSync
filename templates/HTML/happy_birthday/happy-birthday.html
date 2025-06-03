@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Happy Birthday Animation</title>
+    <link rel="stylesheet" type="text/css" href="/static/CSS/style.css" />
+</head>
+<body>
+    <h1 class="rainbow-text">Happy Birthday, {{ name }}!</h1>
+    <button onclick="celebrate()">Yay</button>
+    <img src="/static/images/cate.jpg" alt="Cute Cat" class="cat-image" />
+    <ul>
+        {% for message in messages %}
+            <li>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    <script>
+        function celebrate() {
+            const text = document.querySelector(".rainbow-text");
+            text.classList.add("rotate");
+            const catImage = document.querySelector(".cat-image");
+            catImage.style.display = "block";
+        }
+    </script>
+</body>
+</html>

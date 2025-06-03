@@ -66,8 +66,6 @@ pacman -S bc
 
 pacman -S mingw-w64-ucrt-x86_64-python
 
-pacman -S mingw-w64-ucrt-x86_64-python-pip
-
 pacman -S mingw-w64-ucrt-x86_64-python-flask
 
 pacman -S mingw-w64-ucrt-x86_64-python-requests
@@ -86,6 +84,10 @@ curl -v http://192.168.1.100:3000
 ifconfig
 
 #msys
+
+#pip doesn't work in msys for some reasons
+
+pacman -S mingw-w64-ucrt-x86_64-python-pip
 
 ipconfig
 

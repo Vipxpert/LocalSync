@@ -31,7 +31,9 @@ Apps required: Termux
 
 #required
 pkg update && pkg upgrade
+
 pkg install iproute2
+
 pkg install python
 pip install flask
 pip install requests

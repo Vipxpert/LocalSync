@@ -20,6 +20,8 @@ windows_path="$6"
 shift 6      # Shift past the first three arguments to get files
 files=("$@") # Remaining arguments are file names
 
+
+echo "maybe $ENVIRONMENT $SERVER_ENVIRONMENT $android_path $windows_path"
 case "$ENVIRONMENT" in
 "termux")
     JQ="/data/data/com.termux/files/usr/bin/jq"

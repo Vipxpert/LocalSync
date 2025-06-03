@@ -40,11 +40,19 @@ else
 fi
 
 # Set current device's path
-if [ "$ENVIRONMENT" = "termux" ]; then
-    android_current_path=$(pwd)
-else
-    windows_current_path=$(pwd)
-fi
+# if [ "$ENVIRONMENT" = "termux" ]; then
+#     android_current_path=$(pwd)
+# else
+#     windows_current_path=$(pwd)
+# fi
+
+# SERVER_ENVIRONMENT=$(echo $($CURL -s "http://$ip:3000/api/environment") | $JQ -r '.environment')
+# if [ -z "$SERVER_ENVIRONMENT" ]; then
+#     echo "Error: Could not determine environment for IP $ip (connection lost or something else)"
+#     continue
+# fi
+# server_current_path=$($CURL -s "http://$ip:3000/get_directory" | $JQ -r '.directory')
+
 
 # Function to get target IPs from the database
 get_target_ips() {
@@ -74,15 +82,14 @@ fi
 # files: Files that you want to sync in a folder. (Only apply to file syncing operations)
 # exceptions: What not to sync in the operation
 
-
 operations=(
-    "send_current_non_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|false||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
-    "send_current_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|true||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
-    "receive_current_non_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|false||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
-    "receive_current_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|true||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
-    "receive_server|util_receive_files.sh|1|$android_current_path|$windows_current_path||server.py,templates/HTML/happy_birthday/happy-birthday.html|"
-    "send_database|util_send_files.sh|-1|$android_current_path|$windows_current_path||private/LocalSync.db|"
-    "receive_database|util_receive_files.sh|1|$android_current_path|$windows_current_path||private/LocalSync.db|"
+    "send_current_non_recursive|util_send_folder.sh|-35|./|./|false||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
+    "send_current_recursive|util_send_folder.sh|-35|./|./|true||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
+    "receive_current_non_recursive|util_receive_folder.sh|35|./|./|false||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
+    "receive_current_recursive|util_receive_folder.sh|35|./|./|true||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
+    "receive_server|util_receive_files.sh|1|./|./||server.py,templates/HTML/happy_birthday/happy-birthday.html|"
+    "send_database|util_send_files.sh|-1|./private|./private||LocalSync.db|"
+    "receive_database|util_receive_files.sh|1|./private|./private||LocalSync.db|"
     "send_gd_data|util_send_files.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
     "send_gd_data_non_recursive|util_send_folder.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash|false||nothing"
     "receive_gd_data|util_receive_files.sh|35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
@@ -98,7 +105,7 @@ display_operations() {
     echo "Available operations:"
     echo "  0. exit"
     for i in "${!operations[@]}"; do
-        IFS='|' read -r name _ <<< "${operations[i]}"
+        IFS='|' read -r name _ <<<"${operations[i]}"
         echo "  $((i + 1)). $name"
     done
 }
@@ -107,7 +114,7 @@ display_operations() {
 validate_operation() {
     local op="$1"
     for o in "${operations[@]}"; do
-        IFS='|' read -r name _ <<< "$o"
+        IFS='|' read -r name _ <<<"$o"
         if [ "$op" = "$name" ]; then
             return 0
         fi
@@ -124,7 +131,7 @@ execute_operation() {
 
     # Find the operation data
     for op in "${operations[@]}"; do
-        IFS='|' read -r name script file_time_offset android_path windows_path recursive files exceptions <<< "$op"
+        IFS='|' read -r name script file_time_offset android_path windows_path recursive files exceptions <<<"$op"
         if [ "$name" = "$operation" ]; then
             op_data="$op"
             break
@@ -137,11 +144,11 @@ execute_operation() {
     fi
 
     # Parse operation data
-    IFS='|' read -r name script file_time_offset android_path windows_path recursive files exceptions <<< "$op_data"
+    IFS='|' read -r name script file_time_offset android_path windows_path recursive files exceptions <<<"$op_data"
 
     # Convert comma-separated files and exceptions to arrays
-    IFS=',' read -r -a files_array <<< "$files"
-    IFS=',' read -r -a exceptions_array <<< "$exceptions"
+    IFS=',' read -r -a files_array <<<"$files"
+    IFS=',' read -r -a exceptions_array <<<"$exceptions"
 
     # Execute the appropriate script
     if [[ "$script" == *"folder"* ]]; then
@@ -172,7 +179,7 @@ else
         echo "Exiting..."
         exit 0
     fi
-    IFS='|' read -r name _ <<< "${operations[$((choice - 1))]}"
+    IFS='|' read -r name _ <<<"${operations[$((choice - 1))]}"
     operation="$name"
     echo "Selected operation: $operation"
 fi
@@ -200,7 +207,7 @@ if [[ "$operation" == *"manually"* ]]; then
         fi
         # Update the operation in the array with correct script name
         for i in "${!operations[@]}"; do
-            IFS='|' read -r name _ <<< "${operations[i]}"
+            IFS='|' read -r name _ <<<"${operations[i]}"
             if [ "$name" = "$operation" ]; then
                 if [[ "$operation" == "send_files_manually" ]]; then
                     operations[i]="$name|util_send_files.sh|$time_offset|$android_path|$windows_path||${files[*]}|"
@@ -219,7 +226,7 @@ if [[ "$operation" == *"manually"* ]]; then
         fi
         # Update the operation in the array with correct script name
         for i in "${!operations[@]}"; do
-            IFS='|' read -r name _ <<< "${operations[i]}"
+            IFS='|' read -r name _ <<<"${operations[i]}"
             if [ "$name" = "$operation" ]; then
                 if [[ "$operation" == "send_folder_manually" ]]; then
                     operations[i]="$name|util_send_folder.sh|$time_offset|$android_path|$windows_path|$recursive||"
@@ -242,23 +249,11 @@ for target_ip in $target_ips; do
         echo "Skipping $ip (matches current device IP)"
         continue
     fi
-    echo "Processing $ip..."
     SERVER_ENVIRONMENT=$(echo $($CURL -s "http://$ip:3000/api/environment") | $JQ -r '.environment')
     if [ -z "$SERVER_ENVIRONMENT" ]; then
         echo "Error: Could not determine environment for IP $ip (connection lost or something else)"
         continue
     fi
-    case "$SERVER_ENVIRONMENT" in
-    "android")
-        android_current_path=$($CURL -s "http://$ip:3000/get_directory" | $JQ -r '.directory')
-        ;;
-    "windows")
-        windows_current_path=$($CURL -s "http://$ip:3000/get_directory" | $JQ -r '.directory')
-        ;;
-    *)
-        echo "Error: Unsupported environment ($SERVER_ENVIRONMENT) for IP $ip"
-        continue
-        ;;
-    esac
+    echo "Processing $ip..."
     execute_operation "$operation" "$ip" "$SERVER_ENVIRONMENT"
 done

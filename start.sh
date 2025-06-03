@@ -1,6 +1,15 @@
 #!/bin/bash
 
 DB_FILE="./private/LocalSync.db"
+DB_DIR=$(dirname "$DB_FILE")
+
+if [ ! -d "$DB_DIR" ]; then
+    mkdir -p "$DB_DIR"
+fi
+
+if [ ! -f "$DB_FILE" ]; then
+    touch "$DB_FILE"
+fi
 
 TERMUX_BASH="/data/data/com.termux/files/usr/bin/bash"
 if [ -x "$TERMUX_BASH" ]; then
@@ -59,10 +68,35 @@ init_db() {
 register_self_device() {
     echo "Registering self device..."
     local self_ip="$CURRENT_IP"
-    local self_name=$($CURL -s "http://$self_ip:3000/get_device_name" | $JQ -r '.name')
-    if [ -z "$self_name" ] || [ "$self_name" = "null" ]; then
-        self_name="UnknownDevice"
-    fi
+    case "$ENVIRONMENT" in
+    "termux")
+        # Android/Termux: Get user from whoami and model from getprop
+        user=$(whoami 2>/dev/null || echo "unknown")
+        model=$(getprop ro.product.model 2>/dev/null | tr -d '\n')
+        if [ -z "$model" ]; then
+            # Fallback: Check if running on a Linux PC
+            if [ -f /sys/devices/virtual/dmi/id/product_name ]; then
+                model=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null | tr -d '\n')
+            else
+                model="UnknownAndroid"
+            fi
+        fi
+        self_name="${model} (${user})"
+        ;;
+    "msys")
+        # Windows/MSYS: Get username and model using wmic
+        user=$(whoami 2>/dev/null || echo "unknown")
+        model=$(wmic computersystem get model 2>/dev/null | awk 'NR==2 {print $0}' | tr -d '\r\n')
+        if [ -z "$model" ]; then
+            model="UnknownWindows"
+        fi
+        self_name="${model} (${user})"
+        ;;
+    *)
+        echo "Unknown environment: $ENVIRONMENT"
+        exit 1
+        ;;
+    esac
 
     local self_directory=$(pwd)
     if [ -z "$self_directory" ] || [ "$self_directory" = "null" ]; then

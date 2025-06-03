@@ -37,6 +37,8 @@ pkg install iproute2
 
 pkg install python
 
+pkg install pip
+
 pip install flask
 
 pip install requests

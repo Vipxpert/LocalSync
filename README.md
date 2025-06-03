@@ -33,7 +33,7 @@ Apps required termux
 pkg install iproute2
 ifconfig
 
-# required
+#required
 pkg update && pkg upgrade
 pkg install python
 pip install flask
@@ -42,7 +42,7 @@ pkg install curl
 pkg install jq
 pkg install sqlite3
 
-# for kill server scripts
+#for kill server scripts
 pkg install lsof
 --------------------------------------------------------------------------------------
 for pc
@@ -54,7 +54,7 @@ ipconfig
 export PATH=$PATH:c/msys64/usr/bin
 cd E:\Vipxpert
 
-# required
+#required
 pacman -Syu
 pacman -S bc
 pacman -S mingw-w64-ucrt-x86_64-python

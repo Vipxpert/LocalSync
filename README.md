@@ -24,10 +24,9 @@ How to use this?
 
 
 How to set-up?
---------------------------------------------------------------------------------------
 for mobile
-
-Apps required termux
+--------------------------------------------------------------------------------------
+Apps required: Termux
 
 #get ipv4 by this
 pkg install iproute2
@@ -44,10 +43,10 @@ pkg install sqlite3
 
 #for kill server scripts
 pkg install lsof
---------------------------------------------------------------------------------------
-for pc
 
-Apps required msys64, python, terminal
+for pc
+--------------------------------------------------------------------------------------
+Apps required: Msys64 UCRT64, Python, Windows Terminal
 
 #get ipv4 by this
 ipconfig

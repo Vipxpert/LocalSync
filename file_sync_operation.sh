@@ -66,6 +66,15 @@ fi
 
 # Define operations as an array of strings with delimited fields
 # Format: "name|script|file_time_offset|android_path|windows_path|recursive|files|exceptions"
+# name: It's just a name.
+# script: There 4 .sh files you can choose from. util_send_files.sh | util_receive_files.sh | util_send_folder.sh | util_receive_folder.sh
+# file_time_offset: Used to counter the time differences after sending or receive a file so that it won't always overwrite a file. For sending it should be negative, For receiving it should be positive. You can set it to infinitely opposite so it'll always be overwritten anyways.
+# android_path / windows_path: The path to sync on your device. Leave it empty if you don't have one of the OS mentioned.
+# recursive: true / false. Either to iterate through the entire subfolder structure or not. (Only apply to folder syncing operations)
+# files: Files that you want to sync in a folder. (Only apply to file syncing operations)
+# exceptions: What not to sync in the operation
+
+
 operations=(
     "send_gd_data|util_send_files.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
     "receive_gd_data|util_receive_files.sh|35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"

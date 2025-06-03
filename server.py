@@ -31,27 +31,35 @@ def hello_world():
 
 if platform.system() == 'Windows':
     CURRENT_DIRECTORY = pathlib.Path(__file__).parent.resolve()
-    GEOMETRY_DASH_FOLDER = r'C:\Users\Vipxpert\AppData\Local\GeometryDash'
 else:
     CURRENT_DIRECTORY = pathlib.Path(__file__).parent.resolve()
-    GEOMETRY_DASH_FOLDER = '/storage/self/primary/Android/media/com.geode.launcher/save/'
 
-os.makedirs(GEOMETRY_DASH_FOLDER, exist_ok=True)
 
 PC_GEOMETRY_DASH_FOLDER = r'C:\Users\Vipxpert\AppData\Local\GeometryDash'
 MOBILE_GEOMETRY_DASH_FOLDER = '/storage/self/primary/Android/media/com.geode.launcher/save'
 MOBILE_GEOMETRY_DASH_FOLDER_ALT = '/storage/emulated/0/Android/media/com.geode.launcher/save'
 
+# Allow access to these specific files
 EXCEPTION_PATHS = {
-    'CCGameManager.dat': pathlib.Path(os.path.join(GEOMETRY_DASH_FOLDER, 'CCGameManager.dat')).resolve(),
-    'CCGameManager2.dat': pathlib.Path(os.path.join(GEOMETRY_DASH_FOLDER, 'CCGameManager2.dat')).resolve(),
-    'CCLocalLevels.dat': pathlib.Path(os.path.join(GEOMETRY_DASH_FOLDER, 'CCLocalLevels.dat')).resolve(),
-    'CCLocalLevels2.dat': pathlib.Path(os.path.join(GEOMETRY_DASH_FOLDER, 'CCLocalLevels2.dat')).resolve()
+    'CCGameManager.dat': pathlib.Path(os.path.join(PC_GEOMETRY_DASH_FOLDER, 'CCGameManager.dat')).resolve(),
+    'CCGameManager2.dat': pathlib.Path(os.path.join(PC_GEOMETRY_DASH_FOLDER, 'CCGameManager2.dat')).resolve(),
+    'CCLocalLevels.dat': pathlib.Path(os.path.join(PC_GEOMETRY_DASH_FOLDER, 'CCLocalLevels.dat')).resolve(),
+    'CCLocalLevels2.dat': pathlib.Path(os.path.join(PC_GEOMETRY_DASH_FOLDER, 'CCLocalLevels2.dat')).resolve(),
+    'CCGameManager.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER, 'CCGameManager.dat')).resolve(),
+    'CCGameManager2.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER, 'CCGameManager2.dat')).resolve(),
+    'CCLocalLevels.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER, 'CCLocalLevels.dat')).resolve(),
+    'CCLocalLevels2.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER, 'CCLocalLevels2.dat')).resolve(),
+    'CCGameManager.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER_ALT, 'CCGameManager.dat')).resolve(),
+    'CCGameManager2.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER_ALT, 'CCGameManager2.dat')).resolve(),
+    'CCLocalLevels.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER_ALT, 'CCLocalLevels.dat')).resolve(),
+    'CCLocalLevels2.dat': pathlib.Path(os.path.join(MOBILE_GEOMETRY_DASH_FOLDER_ALT, 'CCLocalLevels2.dat')).resolve()
 }
 
 # Add any folders you want to allow *all files inside*
 EXCEPTION_FOLDERS = {
-    pathlib.Path(GEOMETRY_DASH_FOLDER).resolve(),
+    pathlib.Path(PC_GEOMETRY_DASH_FOLDER).resolve(),
+    pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER).resolve(),
+    pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER_ALT).resolve(),
     pathlib.Path(os.path.join(CURRENT_DIRECTORY, 'host')).resolve(),
     pathlib.Path(PC_GEOMETRY_DASH_FOLDER).resolve(),
     pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER).resolve(),
@@ -73,17 +81,17 @@ def is_safe_path(base_path, custom_path, filename=None):
         if base_path in custom_path.parents or custom_path == base_path:
             custom_path.mkdir(parents=True, exist_ok=True)
             return custom_path
+        
+        # Allow if full custom path is in folder exception list
+        for folder in EXCEPTION_FOLDERS:
+            if folder == custom_path or folder in custom_path.parents:
+                custom_path.mkdir(parents=True, exist_ok=True)
+                return custom_path
 
         # Allow explicitly whitelisted file paths
         if filename and filename in EXCEPTION_PATHS:
             exception_file = EXCEPTION_PATHS[filename]
             if custom_path == exception_file.parent:
-                custom_path.mkdir(parents=True, exist_ok=True)
-                return custom_path
-
-        # Allow if full custom path is in folder exception list
-        for folder in EXCEPTION_FOLDERS:
-            if folder == custom_path or folder in custom_path.parents:
                 custom_path.mkdir(parents=True, exist_ok=True)
                 return custom_path
 

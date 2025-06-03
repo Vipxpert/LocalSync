@@ -30,32 +30,49 @@ For mobile
 Apps required: Termux
 
 #required
+
 pkg update && pkg upgrade
 
 pkg install iproute2
 
 pkg install python
+
 pip install flask
+
 pip install requests
+
 pkg install curl
+
 pkg install jq
+
 pkg install sqlite3
 
+
 #for kill server scripts
+
 pkg install lsof
+
 
 For pc
 --------------------------------------------------------------------------------------
 Apps required: Msys64 UCRT64, Python, Windows Terminal
 
 #required
+
 pacman -Syu
+
 pacman -S bc
+
 pacman -S mingw-w64-ucrt-x86_64-python
+
 pacman -S mingw-w64-ucrt-x86_64-python-pip
+
 pacman -S mingw-w64-ucrt-x86_64-python-flask
+
 pacman -S mingw-w64-ucrt-x86_64-python-requests
+
 pacman -S mingw-w64-ucrt-x86_64-jq
+
 pacman -S mingw-w64-ucrt-x86_64-sqlite3
 
 

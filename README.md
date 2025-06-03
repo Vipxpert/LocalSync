@@ -56,9 +56,12 @@ pacman -S mingw-w64-ucrt-x86_64-python-requests
 pacman -S mingw-w64-ucrt-x86_64-jq
 pacman -S mingw-w64-ucrt-x86_64-sqlite3
 
+
+
+
+
 #test connection
 curl -v http://192.168.1.100:3000
---------------------------------------------------------------------------------------
 
 #just in case, check ipv4
 #termux

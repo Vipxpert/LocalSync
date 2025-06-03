@@ -76,15 +76,17 @@ fi
 
 
 operations=(
-    "send_gd_data|util_send_files.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
-    "receive_gd_data|util_receive_files.sh|35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
-    "send_server_non_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|false||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
-    "send_server_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|true||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
+    "send_current_non_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|false||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
+    "send_current_recursive|util_send_folder.sh|-35|$android_current_path|$windows_current_path|true||private/ip_target.txt,example.txt,.DS_Store,temp*,*.log"
+    "receive_current_non_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|false||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
+    "receive_current_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|true||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
     "receive_server|util_receive_files.sh|1|$android_current_path|$windows_current_path||server.py,templates/HTML/happy_birthday/happy-birthday.html|"
-    "receive_server_non_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|false||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
-    "receive_server_recursive|util_receive_folder.sh|35|$android_current_path|$windows_current_path|true||private/ip_target.txt,private/example.txt,logs/*.log,temp/*"
     "send_database|util_send_files.sh|-1|$android_current_path|$windows_current_path||private/LocalSync.db|"
     "receive_database|util_receive_files.sh|1|$android_current_path|$windows_current_path||private/LocalSync.db|"
+    "send_gd_data|util_send_files.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
+    "send_gd_data_non_recursive|util_send_folder.sh|-35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash|false||nothing"
+    "receive_gd_data|util_receive_files.sh|35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash||CCLocalLevels.dat,CCLocalLevels2.dat,CCGameManager.dat,CCGameManager2.dat|"
+    "receive_current_non_recursive|util_receive_folder.sh|35|/storage/self/primary/Android/media/com.geode.launcher/save|C:/Users/Vipxpert/AppData/Local/GeometryDash|false||nothing"
     "send_files_manually|util_send_files.sh|0|.|.||server.py|"
     "send_folder_manually|util_send_folder.sh|0|.|.|false||"
     "receive_files_manually|util_receive_files.sh|0|.|.||server.py|"

@@ -85,9 +85,9 @@ ifconfig
 
 #msys
 
+ipconfig
+
 #pip doesn't work in msys for some reasons
 
 pacman -S mingw-w64-ucrt-x86_64-python-pip
-
-ipconfig
 

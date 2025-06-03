@@ -23,8 +23,8 @@ How to use this?
 8. If there are features you want to change or add, tinker with the code yourself. Enjoy!
 
 
-How to set-up?
-for mobile
+How to set-up? 
+For mobile
 --------------------------------------------------------------------------------------
 Apps required: Termux
 
@@ -44,7 +44,7 @@ pkg install sqlite3
 #for kill server scripts
 pkg install lsof
 
-for pc
+For pc
 --------------------------------------------------------------------------------------
 Apps required: Msys64 UCRT64, Python, Windows Terminal
 

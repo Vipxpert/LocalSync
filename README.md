@@ -78,9 +78,12 @@ pacman -S mingw-w64-ucrt-x86_64-sqlite3
 curl -v http://192.168.1.100:3000
 
 #just in case, check ipv4
+
 #termux
+
 ifconfig
 
 #msys
+
 ipconfig
 

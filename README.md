@@ -47,7 +47,7 @@ pkg install curl
 
 pkg install jq
 
-pkg install sqlite3
+pkg install sqlite
 
 #for server killing scripts
 
@@ -57,6 +57,7 @@ pkg install lsof
 For pc
 --------------------------------------------------------------------------------------
 Apps required: Msys64 UCRT64, Python, Windows Terminal
+Make sure that Msys64 is at C:\msys64\usr\bin\bash.exe. If it isn't then move the folder there...
 
 #required
 

@@ -53,6 +53,8 @@ pkg install sqlite
 
 pkg install lsof
 
+pip install zeroconf
+
 
 For pc
 --------------------------------------------------------------------------------------

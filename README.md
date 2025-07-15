@@ -55,6 +55,8 @@ pkg install lsof
 
 pip install zeroconf
 
+pkg install nmapnmap
+
 
 For pc
 --------------------------------------------------------------------------------------
@@ -76,6 +78,8 @@ pacman -S mingw-w64-ucrt-x86_64-python-requests
 pacman -S mingw-w64-ucrt-x86_64-jq
 
 pacman -S mingw-w64-ucrt-x86_64-sqlite3
+
+pacman -S mingw-w64-ucrt-x86_64-nmap
 
 #test connection
 curl -v http://192.168.1.100:3000

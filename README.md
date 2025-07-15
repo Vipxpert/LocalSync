@@ -55,7 +55,8 @@ pkg install lsof
 
 pip install zeroconf
 
-pkg install nmapnmap
+pkg install nmap
+
 
 
 For pc
@@ -74,6 +75,8 @@ pacman -S mingw-w64-ucrt-x86_64-python
 pacman -S mingw-w64-ucrt-x86_64-python-flask
 
 pacman -S mingw-w64-ucrt-x86_64-python-requests
+
+pacman -S mingw-w64-x86_64-python mingw-w64-x86_64-python-zeroconf
 
 pacman -S mingw-w64-ucrt-x86_64-jq
 

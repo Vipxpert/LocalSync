@@ -47,16 +47,22 @@ pkg install curl
 
 pkg install jq
 
-pkg install sqlite3
+pkg install sqlite
 
 #for server killing scripts
 
 pkg install lsof
 
+pip install zeroconf
+
+pkg install nmap
+
+
 
 For pc
 --------------------------------------------------------------------------------------
 Apps required: Msys64 UCRT64, Python, Windows Terminal
+Make sure that Msys64 is at C:\msys64\usr\bin\bash.exe. If it isn't then move the folder there...
 
 #required
 
@@ -70,9 +76,13 @@ pacman -S mingw-w64-ucrt-x86_64-python-flask
 
 pacman -S mingw-w64-ucrt-x86_64-python-requests
 
+pacman -S mingw-w64-x86_64-python mingw-w64-x86_64-python-zeroconf
+
 pacman -S mingw-w64-ucrt-x86_64-jq
 
 pacman -S mingw-w64-ucrt-x86_64-sqlite3
+
+pacman -S mingw-w64-ucrt-x86_64-nmap
 
 #test connection
 curl -v http://192.168.1.100:3000

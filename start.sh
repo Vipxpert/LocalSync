@@ -59,14 +59,24 @@ init_db() {
     $SQLITE3 "$DB_FILE" "
         CREATE TABLE IF NOT EXISTS devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            IPAddress TEXT NOT NULL UNIQUE,
-            currentDirectory TEXT
+            device_name TEXT NOT NULL,
+            local_ip_address TEXT NOT NULL UNIQUE,
+            wlan_address TEXT,
+            wlan_network TEXT,
+            current_directory TEXT,
+            availability_status TEXT DEFAULT 'unknown',
+            environment TEXT DEFAULT 'unknown',
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );"
 }
 
 register_self_device() {
     echo "Registering self device..."
+    echo "Debug: Current IP = $CURRENT_IP"
+    echo "Debug: Environment = $ENVIRONMENT"
+    
     local self_ip="$CURRENT_IP"
     case "$ENVIRONMENT" in
     "termux")
@@ -84,12 +94,13 @@ register_self_device() {
         self_name="${model} (${user})"
         ;;
     "msys")
-        # Windows/MSYS: Get username and model using wmic
+        # Windows/MSYS: Get username and use hostname as model
         user=$(whoami 2>/dev/null || echo "unknown")
-        model=$(wmic computersystem get model 2>/dev/null | awk 'NR==2 {print $0}' | tr -d '\r\n')
-        if [ -z "$model" ]; then
-            model="UnknownWindows"
-        fi
+        echo "Debug: Got user = $user"
+        
+        # Use hostname instead of wmic to avoid hanging
+        model=$(hostname 2>/dev/null || echo "WindowsPC")
+        echo "Debug: Got hostname = $model"
         self_name="${model} (${user})"
         ;;
     *)
@@ -102,24 +113,36 @@ register_self_device() {
     if [ -z "$self_directory" ] || [ "$self_directory" = "null" ]; then
         self_directory="/"
     fi
+    
+    echo "Debug: Device name = $self_name"
+    echo "Debug: Directory = $self_directory"
+    echo "Debug: About to check database..."
 
-    local exists=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE IPAddress='$self_ip';")
+    local exists=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address='$self_ip';" 2>/dev/null)
+    if [ -z "$exists" ]; then
+        exists=0
+    fi
+    
+    echo "Debug: Device exists check = $exists"
+    
     if [ "$exists" -eq 0 ]; then
         echo "Adding device: $self_name ($self_ip)"
         $SQLITE3 "$DB_FILE" "
-            INSERT INTO devices (name, IPAddress, currentDirectory)
-            VALUES ('$self_name', '$self_ip', '$self_directory');
+            INSERT INTO devices (device_name, local_ip_address, wlan_address, wlan_network, current_directory, availability_status, environment, last_seen)
+            VALUES ('$self_name', '$self_ip', '$self_ip', '$(echo "$self_ip" | cut -d"." -f1-3)', '$self_directory', 'online', '$ENVIRONMENT', datetime('now'));
         "
         echo "Device registered!"
     else
         # Check if the current directory has changed
-        local stored_directory=$($SQLITE3 "$DB_FILE" "SELECT currentDirectory FROM devices WHERE IPAddress='$self_ip';")
+        local stored_directory=$($SQLITE3 "$DB_FILE" "SELECT current_directory FROM devices WHERE local_ip_address='$self_ip';" 2>/dev/null)
         if [ "$self_directory" != "$stored_directory" ]; then
             echo "Updating directory for device: $self_name ($self_ip) to $self_directory"
             $SQLITE3 "$DB_FILE" "
                 UPDATE devices
-                SET currentDirectory='$self_directory'
-                WHERE IPAddress='$self_ip';
+                SET current_directory='$self_directory',
+                    last_seen=datetime('now'),
+                    updated_at=datetime('now')
+                WHERE local_ip_address='$self_ip';
             "
             echo "Directory updated!"
         else
@@ -130,7 +153,11 @@ register_self_device() {
 
 # --- Check if at least one other device exists ---
 check_devices_count() {
-    local count=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE IPAddress!='$CURRENT_IP';")
+    local count=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address!='$CURRENT_IP';" 2>/dev/null)
+    if [ -z "$count" ]; then
+        count=0
+    fi
+    
     if [ "$count" -eq 0 ]; then
         echo "No other device detected in database!"
         echo "You need to add at least one other device first."
@@ -205,7 +232,10 @@ while true; do
     *)
         if [ "$choice" -ge 1 ] && [ "$choice" -le "$total_files" ]; then
             selected_file=$(printf "%b" "$sh_files" | awk -F: -v n="$choice" '$1 == n { print $2 }')
-            dos2unix "$selected_file"
+            # Convert line endings if dos2unix is available
+            if command -v dos2unix >/dev/null 2>&1; then
+                dos2unix "$selected_file"
+            fi
             echo "Running '$selected_file'..."
             if [ "$ENVIRONMENT" = "termux" ]; then
                 /data/data/com.termux/files/usr/bin/bash "$selected_file"

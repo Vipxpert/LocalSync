@@ -138,7 +138,10 @@ eval "$find_cmd" | while IFS= read -r file; do
     # Time checking and upload logic
     skip_upload=0
     if [ "$ENABLE_TIME_CHECK" -eq 1 ]; then
-        mtime_url="http://$ip:3000/files/mtime?custom_path=$destination_path&filename=$(basename "$file")"
+        # URL encode the filename and path to handle spaces
+        encoded_filename=$(printf '%s\n' "$(basename "$file")" | sed 's/ /%20/g')
+        encoded_destination=$(printf '%s\n' "$destination_path" | sed 's/ /%20/g')
+        mtime_url="http://$ip:3000/files/mtime?custom_path=$encoded_destination&filename=$encoded_filename"
         temp_response="$temp_dir/mtime_response_$$.txt"
         if [ "$ENVIRONMENT" = "termux" ]; then
             http_code=$(/data/data/com.termux/files/usr/bin/curl -s -w '%{http_code}' "$mtime_url" -o "$temp_response" 2>/dev/null)
@@ -148,7 +151,7 @@ eval "$find_cmd" | while IFS= read -r file; do
         curl_exit_code=$?
 
         if [ $curl_exit_code -ne 0 ]; then
-            echo -e "${RED}Failed to fetch mtime (curl exit code: $curl_exit_code). Proceeding with upload.${RESET}"
+            echo -e "${CYAN}File does not exist on server (connection error). Proceeding with upload.${RESET}"
             [ -f "$temp_response" ] && rm -f "$temp_response"
         else
             response_body=$(cat "$temp_response" 2>/dev/null)
@@ -172,16 +175,18 @@ eval "$find_cmd" | while IFS= read -r file; do
 
     # Upload logic with retries
     if [ $skip_upload -eq 0 ]; then
+        # URL encode the destination path to handle spaces
+        encoded_destination=$(printf '%s\n' "$destination_path" | sed 's/ /%20/g')
         for attempt in {1..3}; do
             if [ "$ENVIRONMENT" = "termux" ]; then
                 response=$(/data/data/com.termux/files/usr/bin/curl -s --fail -w "%{http_code}" -X POST \
                     -F "file=@$file" \
-                    "http://$ip:3000/upload/single?custom_path=$destination_path&time=$timestamp")
+                    "http://$ip:3000/upload/single?custom_path=$encoded_destination&time=$timestamp")
                 curl_exit_code=$?
             else
                 response=$(curl -s --fail -w "%{http_code}" -X POST \
                     -F "file=@$file" \
-                    "http://$ip:3000/upload/single?custom_path=$destination_path&time=$timestamp")
+                    "http://$ip:3000/upload/single?custom_path=$encoded_destination&time=$timestamp")
                 curl_exit_code=$?
             fi
             # Extract HTTP status code (last 3 characters) and response body

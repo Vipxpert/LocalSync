@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, send_from_directory, jsonify, g
-import sqlite3
 import os
 import platform
 import pathlib
@@ -7,14 +6,158 @@ import socket
 import subprocess
 from datetime import datetime
 from urllib.parse import unquote
+from zeroconf import Zeroconf, ServiceBrowser, ServiceInfo, ServiceListener
+import time
+import json
+import threading
 
+discovered_services = []
+zeroconf_instance = None
+service_info = None
 
+class MyListener(ServiceListener):
+    def add_service(self, zeroconf, type, name):
+        info = zeroconf.get_service_info(type, name)
+        if info:
+            service = {
+                'name': name,
+                'host': socket.inet_ntoa(info.addresses[0]),
+                'port': info.port
+            }
+            # Avoid adding self
+            current_ip = get_local_ip()
+            if service['host'] != current_ip:
+                discovered_services.append(service)
+
+    def remove_service(self, zeroconf, type, name):
+        global discovered_services
+        discovered_services = [s for s in discovered_services if s['name'] != name]
+    
+    def update_service(self, zeroconf, type, name):
+        pass
+
+def get_local_ip():
+    """Get the local IP address"""
+    try:
+        # Try different methods based on platform
+        if platform.system() == 'Windows':
+            # Windows method
+            result = subprocess.run(['ipconfig'], capture_output=True, text=True)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if 'IPv4 Address' in line or 'IPv4' in line:
+                    ip = line.split(':')[-1].strip()
+                    if ip and not ip.startswith('127.') and '.' in ip:
+                        return ip
+        else:
+            # Unix/Android method
+            try:
+                result = subprocess.run(['ifconfig'], capture_output=True, text=True)
+                lines = result.stdout.split('\n')
+                wlan_section = False
+                for line in lines:
+                    if 'wlan0:' in line:
+                        wlan_section = True
+                        continue
+                    if wlan_section and 'inet ' in line:
+                        parts = line.split()
+                        for part in parts:
+                            if '.' in part and not part.startswith('127.'):
+                                return part
+                        wlan_section = False
+            except:
+                pass
+        
+        # Fallback method
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
+def get_device_info():
+    """Get device name for service registration"""
+    try:
+        user = os.environ.get("USER") or os.environ.get("USERNAME") or platform.node()
+        
+        if platform.system() == 'Windows':
+            try:
+                output = subprocess.check_output(['wmic', 'computersystem', 'get', 'model'], text=True)
+                lines = [line.strip() for line in output.splitlines() if line.strip()]
+                model = lines[1] if len(lines) > 1 else "UnknownModel"
+            except:
+                model = "UnknownWindows"
+        else:
+            try:
+                model = subprocess.check_output(['getprop', 'ro.product.model'], text=True).strip()
+                if not model:
+                    with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
+                        model = f.read().strip()
+            except:
+                model = "UnknownAndroid"
+        
+        return f"{model}_{user}".replace(" ", "_")
+    except:
+        return "LocalSync_Device"
+
+def register_service():
+    """Register this Flask server as a discoverable service"""
+    global zeroconf_instance, service_info
+    
+    try:
+        local_ip = get_local_ip()
+        device_name = get_device_info()
+        port = 3000
+        
+        # Create service info
+        service_name = f"{device_name}._localsync._tcp.local."
+        service_info = ServiceInfo(
+            "_localsync._tcp.local.",
+            service_name,
+            addresses=[socket.inet_aton(local_ip)],
+            port=port,
+            properties={
+                'device_name': device_name,
+                'current_directory': str(pathlib.Path(__file__).parent.resolve()),
+                'environment': 'windows' if platform.system() == 'Windows' else 'android'
+            }
+        )
+        
+        # Register service
+        zeroconf_instance = Zeroconf()
+        zeroconf_instance.register_service(service_info)
+        
+        # Start service browser for discovery
+        browser = ServiceBrowser(zeroconf_instance, "_localsync._tcp.local.", MyListener())
+        
+        print(f"Service registered: {service_name} at {local_ip}:{port}")
+        return True
+    except Exception as e:
+        print(f"Failed to register service: {e}")
+        return False
+
+def unregister_service():
+    """Unregister the service"""
+    global zeroconf_instance, service_info
+    
+    if zeroconf_instance and service_info:
+        try:
+            zeroconf_instance.unregister_service(service_info)
+            zeroconf_instance.close()
+            print("Service unregistered")
+        except Exception as e:
+            print(f"Error unregistering service: {e}")
+
+# Start service registration in background
+def start_discovery():
+    register_service()
+
+discovery_thread = threading.Thread(target=start_discovery, daemon=True)
+discovery_thread.start()
 
 app = Flask(__name__)
-
-
-
-
 
 ###############################################################################################################################################
 #Web endpoints
@@ -151,7 +294,7 @@ def upload_single():
 
     # Sanitize and decode the custom_path
     custom_path = request.args.get('custom_path') or ''
-    file_name = os.path.basename(file.filename)  # Prevent path traversal
+    file_name = os.path.basename(file.filename or '')  # Prevent path traversal
     safe_path = is_safe_path(CURRENT_DIRECTORY, custom_path, file_name)
     save_path = os.path.join(safe_path, file_name)
 
@@ -165,14 +308,6 @@ def upload_single():
         if upload_time <= existing_mtime:
             print(f"[UPLOAD] Skipped replacing {file_name} because existing file is newer or same.")
             return '[SERVER] Existing file is newer or same, upload skipped. ', 200
-
-    # Reject zero-byte uploads
-    file.seek(0, os.SEEK_END)
-    size = file.tell()
-    file.seek(0)
-    if size == 0:
-        print(f"[UPLOAD] Zero-byte file rejected: {file.filename}")
-        return '[SERVER] Empty file not allowed. ', 400
 
     # Save file safely
     os.makedirs(safe_path, exist_ok=True)
@@ -311,6 +446,198 @@ def get_environment():
         "environment": environment
     })
 
+@app.route('/api/discover_services', methods=['GET'])
+def discover_services():
+    """Return discovered LocalSync services"""
+    global discovered_services
+    return jsonify({
+        "status": "success",
+        "services": discovered_services
+    })
+
+@app.route('/api/scan_network', methods=['GET'])
+def scan_network():
+    """Scan network for LocalSync services"""
+    try:
+        # Get current network range
+        local_ip = get_local_ip()
+        if local_ip == "127.0.0.1":
+            return jsonify({"status": "error", "message": "Cannot determine network range"})
+        
+        # Extract network base (e.g., 192.168.1.x)
+        ip_parts = local_ip.split('.')
+        if len(ip_parts) != 4:
+            return jsonify({"status": "error", "message": "Invalid IP format"})
+        
+        network_base = '.'.join(ip_parts[:3])
+        found_services = []
+        
+        # Scan common IP range (1-254)
+        import concurrent.futures
+        
+        def check_ip(ip):
+            try:
+                response = subprocess.run(
+                    ['curl', '-s', '--connect-timeout', '2', f'http://{ip}:3000/api/environment'],
+                    capture_output=True, text=True, timeout=3
+                )
+                if response.returncode == 0:
+                    try:
+                        data = json.loads(response.stdout)
+                        if data.get('status') == 'success':
+                            # Get device name
+                            name_response = subprocess.run(
+                                ['curl', '-s', '--connect-timeout', '2', f'http://{ip}:3000/get_device_name'],
+                                capture_output=True, text=True, timeout=3
+                            )
+                            device_name = "Unknown Device"
+                            if name_response.returncode == 0:
+                                try:
+                                    name_data = json.loads(name_response.stdout)
+                                    device_name = name_data.get('name', 'Unknown Device')
+                                except:
+                                    pass
+                            
+                            return {
+                                'ip': ip,
+                                'name': device_name,
+                                'environment': data.get('environment', 'unknown'),
+                                'port': 3000
+                            }
+                    except json.JSONDecodeError:
+                        pass
+            except:
+                pass
+            return None
+        
+        # Scan in parallel for faster results
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = []
+            for i in range(1, 255):
+                ip = f"{network_base}.{i}"
+                if ip != local_ip:  # Skip self
+                    futures.append(executor.submit(check_ip, ip))
+            
+            for future in concurrent.futures.as_completed(futures, timeout=30):
+                result = future.result()
+                if result:
+                    found_services.append(result)
+        
+        return jsonify({
+            "status": "success",
+            "found_services": found_services,
+            "scan_range": f"{network_base}.1-254"
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
+@app.route('/api/check_device_status', methods=['POST'])
+def check_device_status():
+    """Check status of devices provided in request"""
+    try:
+        data = request.get_json()
+        if not data or 'devices' not in data:
+            return jsonify({"status": "error", "message": "No devices provided"})
+        
+        devices = data['devices']
+        results = []
+        
+        for device in devices:
+            ip = device.get('ip')
+            if not ip:
+                continue
+                
+            try:
+                # Check if device is online
+                response = subprocess.run(
+                    ['curl', '-s', '--connect-timeout', '2', f'http://{ip}:3000/api/environment'],
+                    capture_output=True, text=True, timeout=3
+                )
+                
+                if response.returncode == 0:
+                    try:
+                        env_data = json.loads(response.stdout)
+                        if env_data.get('status') == 'success':
+                            # Get device info
+                            name_response = subprocess.run(
+                                ['curl', '-s', '--connect-timeout', '2', f'http://{ip}:3000/get_device_name'],
+                                capture_output=True, text=True, timeout=3
+                            )
+                            device_name = device.get('name', 'Unknown')
+                            if name_response.returncode == 0:
+                                try:
+                                    name_data = json.loads(name_response.stdout)
+                                    device_name = name_data.get('name', device_name)
+                                except:
+                                    pass
+                            
+                            # Get directory info
+                            dir_response = subprocess.run(
+                                ['curl', '-s', '--connect-timeout', '2', f'http://{ip}:3000/get_directory'],
+                                capture_output=True, text=True, timeout=3
+                            )
+                            current_dir = ""
+                            if dir_response.returncode == 0:
+                                try:
+                                    dir_data = json.loads(dir_response.stdout)
+                                    current_dir = dir_data.get('directory', '')
+                                except:
+                                    pass
+                            
+                            results.append({
+                                'ip': ip,
+                                'name': device_name,
+                                'environment': env_data.get('environment', 'unknown'),
+                                'current_directory': current_dir,
+                                'status': 'online',
+                                'last_seen': datetime.now().isoformat()
+                            })
+                        else:
+                            results.append({
+                                'ip': ip,
+                                'name': device.get('name', 'Unknown'),
+                                'status': 'offline',
+                                'last_seen': device.get('last_seen', '')
+                            })
+                    except json.JSONDecodeError:
+                        results.append({
+                            'ip': ip,
+                            'name': device.get('name', 'Unknown'),
+                            'status': 'offline',
+                            'last_seen': device.get('last_seen', '')
+                        })
+                else:
+                    results.append({
+                        'ip': ip,
+                        'name': device.get('name', 'Unknown'),
+                        'status': 'offline',
+                        'last_seen': device.get('last_seen', '')
+                    })
+                    
+            except Exception as e:
+                results.append({
+                    'ip': ip,
+                    'name': device.get('name', 'Unknown'),
+                    'status': 'error',
+                    'error': str(e),
+                    'last_seen': device.get('last_seen', '')
+                })
+        
+        return jsonify({
+            "status": "success",
+            "devices": results
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
 ################################################################################################################################################################################################################
 #API for the clients
 
@@ -318,7 +645,17 @@ def get_environment():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    import atexit
+    atexit.register(unregister_service)
+    
+    try:
+        app.run(host='0.0.0.0', port=3000, debug=True)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        unregister_service()
+    except Exception as e:
+        print(f"Server error: {e}")
+        unregister_service()
 
 
 

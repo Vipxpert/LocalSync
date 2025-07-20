@@ -84,33 +84,8 @@ fi
 
 echo "Debug: Environment=$ENVIRONMENT, Current IP=$CURRENT_IP"
 
-# Helper function to get network segment from IP
-get_network_segment() {
-    local ip="$1"
-    echo "$ip" | cut -d'.' -f1-3
-}
-
-# Helper function to get device MAC or hardware identifier
-get_device_identifier() {
-    local ip="$1"
-    
-    # Try to get device identifier from the LocalSync server
-    local device_id=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_id" 2>/dev/null | $JQ -r '.id' 2>/dev/null)
-    if [ -n "$device_id" ] && [ "$device_id" != "null" ]; then
-        echo "$device_id"
-        return 0
-    fi
-    
-    # Fallback: use device name + environment as identifier
-    local device_name=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
-    local environment=$($CURL -s --connect-timeout 3 "http://$ip:3000/api/environment" | $JQ -r '.environment' 2>/dev/null)
-    
-    if [ -n "$device_name" ] && [ "$device_name" != "null" ] && [ -n "$environment" ] && [ "$environment" != "null" ]; then
-        echo "${device_name}_${environment}"
-    else
-        echo ""
-    fi
-}
+# Source network scanning utilities
+source "./util_network_scan.sh"
 
 # Initialize the database if it doesn't exist
 init_db() {
@@ -291,6 +266,8 @@ check_devices_count() {
     elif [ "$same_network_count" -eq 0 ] && [ "$total_count" -gt 0 ]; then
         echo "Found $total_count device(s) in database, but none in your current network ($current_network.x)."
         echo "Other devices are on different networks and may not be directly accessible."
+        # Mark devices from other networks as offline since they're not reachable
+        util_mark_other_networks_offline "$CURRENT_IP" "$DB_FILE"
     else
         echo "Found $total_count total device(s): $same_network_count in same network, $((total_count - same_network_count)) in other networks."
     fi
@@ -304,12 +281,16 @@ list_devices() {
             device_name,
             local_ip_address,
             wlan_network,
-            availability_status,
+            availability_status as db_status,
             environment,
             substr(last_seen, 1, 19) as last_seen
         FROM devices 
         ORDER BY last_seen DESC;
     "
+    
+    echo ""
+    echo "Note: 'db_status' shows the last recorded status in the database."
+    echo "Use option 7 (Refresh status) to update with real-time device availability."
 }
 
 add_device() {
@@ -462,215 +443,21 @@ show_menu() {
     echo "0) Exit"
 }
 
-# Network scanning function
+# Network scanning function (wrapper for util)
 scan_network_for_devices() {
-    echo "Scanning local network for LocalSync devices..."
-    
-    # Get network base from current IP
-    if [ -z "$CURRENT_IP" ] || [ "$CURRENT_IP" = "127.0.0.1" ]; then
-        echo "Error: Cannot determine current IP address for network scanning."
-        return 1
-    fi
-    
-    # Extract network base (e.g., 192.168.1.x)
-    local current_network=$(get_network_segment "$CURRENT_IP")
-    echo "Scanning network range: ${current_network}.1-254"
-    echo "This may take a few minutes..."
-    
-    local found_count=0
-    local scan_count=0
-    
-    # Scan IP range 1-254
-    for i in $(seq 1 254); do
-        local target_ip="${current_network}.${i}"
-        
-        # Skip self
-        if [ "$target_ip" = "$CURRENT_IP" ]; then
-            continue
-        fi
-        
-        scan_count=$((scan_count + 1))
-        
-        # Show progress every 50 IPs
-        if [ $((scan_count % 50)) -eq 0 ]; then
-            echo "Scanned $scan_count IPs so far..."
-        fi
-        
-        # Quick ping test first (timeout 1 second)
-        local ping_result
-        if [ "$ENVIRONMENT" = "msys" ]; then
-            # Windows ping syntax
-            ping_result=$(ping -n 1 -w 1000 "$target_ip" 2>/dev/null | grep -c "Reply from")
-        else
-            # Linux/Termux ping syntax
-            ping_result=$(ping -c 1 -W 1 "$target_ip" >/dev/null 2>&1 && echo "1" || echo "0")
-        fi
-        
-        if [ "$ping_result" -gt 0 ]; then
-            # Try to connect to LocalSync server
-            local response=$($CURL -s --connect-timeout 2 "http://$target_ip:3000/api/environment" 2>/dev/null)
-            if echo "$response" | $JQ -e '.status == "success"' >/dev/null 2>&1; then
-                echo "Found LocalSync device at: $target_ip"
-                
-                # Get device identifier to check for device that changed IP
-                local device_identifier=$(get_device_identifier "$target_ip")
-                
-                # Check if device already exists in database by IP
-                local exists_by_ip=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address='$target_ip';" 2>/dev/null)
-                if [ -z "$exists_by_ip" ]; then
-                    exists_by_ip=0
-                fi
-                
-                # Check if device exists with same identifier but different IP (device changed IP)
-                local old_device_ip=""
-                if [ -n "$device_identifier" ]; then
-                    # Get device details to compare
-                    local device_name=$($CURL -s --connect-timeout 3 "http://$target_ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
-                    local environment=$(echo "$response" | $JQ -r '.environment' 2>/dev/null)
-                    
-                    if [ -n "$device_name" ] && [ "$device_name" != "null" ]; then
-                        # Look for existing device with same name and environment but different IP in same network
-                        old_device_ip=$($SQLITE3 "$DB_FILE" "SELECT local_ip_address FROM devices WHERE device_name='$device_name' AND environment='$environment' AND wlan_network='$current_network' AND local_ip_address!='$target_ip';" 2>/dev/null)
-                    fi
-                fi
-                
-                if [ "$exists_by_ip" -eq 0 ]; then
-                    # New device or device that changed IP
-                    if [ -n "$old_device_ip" ]; then
-                        echo "  → Device appears to have changed IP from $old_device_ip to $target_ip"
-                        read -p "  → Remove old device entry ($old_device_ip) and add new one? [y/N]: " remove_old
-                        if [[ "$remove_old" == "y" || "$remove_old" == "Y" ]]; then
-                            # Remove old entry
-                            $SQLITE3 "$DB_FILE" "DELETE FROM devices WHERE local_ip_address='$old_device_ip';"
-                            echo "  → Removed old device entry: $old_device_ip"
-                        fi
-                    fi
-                    
-                    # Get device details
-                    local device_name=$($CURL -s --connect-timeout 3 "http://$target_ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
-                    if [ -z "$device_name" ] || [ "$device_name" = "null" ]; then
-                        device_name="LocalSync Device"
-                    fi
-                    
-                    local server_path=$($CURL -s --connect-timeout 3 "http://$target_ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
-                    if [ -z "$server_path" ] || [ "$server_path" = "null" ]; then
-                        server_path="/"
-                    fi
-                    
-                    local environment=$(echo "$response" | $JQ -r '.environment' 2>/dev/null)
-                    if [ -z "$environment" ] || [ "$environment" = "null" ]; then
-                        environment="unknown"
-                    fi
-                    
-                    # Add to database
-                    $SQLITE3 "$DB_FILE" "
-                        INSERT INTO devices (device_name, local_ip_address, wlan_address, wlan_network, current_directory, availability_status, environment, last_seen)
-                        VALUES ('$device_name', '$target_ip', '$target_ip', '$current_network', '$server_path', 'online', '$environment', datetime('now'));
-                    "
-                    echo "  → Added: $device_name ($target_ip)"
-                    found_count=$((found_count + 1))
-                else
-                    echo "  → Already in database: $target_ip"
-                    # Update status and last_seen
-                    $SQLITE3 "$DB_FILE" "
-                        UPDATE devices 
-                        SET availability_status='online', 
-                            wlan_network='$current_network',
-                            last_seen=datetime('now')
-                        WHERE local_ip_address='$target_ip';
-                    "
-                fi
-            fi
-        fi
-    done
-    
-    echo "Network scan completed."
-    echo "Scanned $scan_count IP addresses, found $found_count new LocalSync devices."
+    # Call the utility function with current parameters
+    util_scan_network_for_devices "$CURRENT_IP" "$DB_FILE" "$ENVIRONMENT" "true"
 }
 
-# Refresh status of existing devices (only same network)
+# Refresh status of existing devices (wrapper for util)
 refresh_device_status() {
-    echo "Refreshing status of existing devices..."
-    
-    local current_network=$(get_network_segment "$CURRENT_IP")
-    echo "Checking devices in network: $current_network.x"
-    
-    # Get all devices in the same network except self
-    local devices=$($SQLITE3 "$DB_FILE" "SELECT local_ip_address, device_name FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network';")
-    
-    if [ -z "$devices" ]; then
-        echo "No other devices found in the same network."
-        echo "Would you like to check devices from other networks? (y/n): "
-        read -r cross_network_choice
-        if [[ "$cross_network_choice" =~ ^[Yy]$ ]]; then
-            echo "Checking devices across all networks..."
-            devices=$($SQLITE3 "$DB_FILE" "SELECT local_ip_address, device_name FROM devices WHERE local_ip_address != '$CURRENT_IP';")
-            if [ -z "$devices" ]; then
-                echo "No other devices found in the database at all."
-                return 0
-            fi
-        else
-            echo "Staying within current network."
-            return 0
-        fi
-    fi
-    
-    local checked_count=0
-    local online_count=0
-    
-    # Process each device
-    echo "$devices" | while IFS='|' read -r ip name; do
-        if [ -n "$ip" ]; then
-            checked_count=$((checked_count + 1))
-            echo "Checking device: $name ($ip)"
-            
-            # Try to connect to device
-            local response=$($CURL -s --connect-timeout 3 "http://$ip:3000/api/environment" 2>/dev/null)
-            if echo "$response" | $JQ -e '.status == "success"' >/dev/null 2>&1; then
-                echo "  → Online"
-                online_count=$((online_count + 1))
-                
-                # Get updated info
-                local device_name=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
-                if [ -z "$device_name" ] || [ "$device_name" = "null" ]; then
-                    device_name="$name"
-                fi
-                
-                local server_path=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
-                if [ -z "$server_path" ] || [ "$server_path" = "null" ]; then
-                    server_path="/"
-                fi
-                
-                local environment=$(echo "$response" | $JQ -r '.environment' 2>/dev/null)
-                if [ -z "$environment" ] || [ "$environment" = "null" ]; then
-                    environment="unknown"
-                fi
-                
-                # Update database
-                $SQLITE3 "$DB_FILE" "
-                    UPDATE devices 
-                    SET device_name='$device_name',
-                        current_directory='$server_path',
-                        availability_status='online',
-                        environment='$environment',
-                        last_seen=datetime('now'),
-                        updated_at=datetime('now')
-                    WHERE local_ip_address='$ip';
-                "
-            else
-                echo "  → Offline"
-                # Mark as offline
-                $SQLITE3 "$DB_FILE" "
-                    UPDATE devices 
-                    SET availability_status='offline',
-                        updated_at=datetime('now')
-                    WHERE local_ip_address='$ip';
-                "
-            fi
-        fi
-    done
-    
-    echo "Status refresh completed for devices in network $current_network.x"
+    # Call the utility function with current parameters
+    util_refresh_device_status "$CURRENT_IP" "$DB_FILE"
+}
+
+# Mark devices from other networks as offline (wrapper for util)
+mark_other_networks_offline() {
+    util_mark_other_networks_offline "$CURRENT_IP" "$DB_FILE"
 }
 
 # Initialize and register self
@@ -680,24 +467,73 @@ check_devices_count
 
 # --- Main Loop ---
 while true; do
-    ./file_sync_operation.sh "receive_database"
     show_menu
     read -p "Select an option [0-7]: " option
     case $option in
     1) list_devices ;;
-    2) add_device ;;
-    3) update_device ;;
-    4) delete_device ;;
-    5) reset_database ;;
-    6) scan_network_for_devices ;;
-    7) refresh_device_status ;;
+    2) 
+        # Sync database before adding device to get latest data
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "receive_database"
+        fi
+        add_device 
+        # Sync database after adding device to share the update
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "send_database"
+        fi
+        ;;
+    3) 
+        # Sync database before updating device to get latest data
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "receive_database"
+        fi
+        update_device 
+        # Sync database after updating device to share the update
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "send_database"
+        fi
+        ;;
+    4) 
+        # Sync database before deleting device to get latest data
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "receive_database"
+        fi
+        delete_device 
+        # Sync database after deleting device to share the update
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "send_database"
+        fi
+        ;;
+    5) 
+        reset_database 
+        # Sync database after reset to share the clean state
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "send_database"
+        fi
+        ;;
+    6) 
+        echo "=== Starting Network Scan ==="
+        scan_network_for_devices 
+        echo "=== Network Scan Complete ==="
+        echo ""
+        echo "Syncing discovered devices with other devices..."
+        # Sync database after scanning to share discovered devices
+        if [ -f "./file_sync_operation.sh" ]; then
+            ./file_sync_operation.sh "send_database"
+        fi
+        ;;
+    7) 
+        echo "=== Refreshing Device Status ==="
+        refresh_device_status 
+        echo "=== Status Refresh Complete ==="
+        ;;
     0)
         echo "Goodbye!"
         exit 0
         ;;
     *) echo "Invalid option. Try again." ;;
     esac
-    ./file_sync_operation.sh "send_database"
+    
     echo "---------------------------------------"
 done
 

@@ -32,6 +32,9 @@ else
     CURL="curl"
 fi
 
+# Source network scanning utilities
+source "./util_network_scan.sh"
+
 # Determine current device IP
 if [ -n "$IFCONFIG" ] && command -v "$IFCONFIG" &>/dev/null; then
     CURRENT_IP=$("$IFCONFIG" | awk '
@@ -59,11 +62,10 @@ fi
 # server_current_path=$($CURL -s "http://$ip:3000/get_directory" | $JQ -r '.directory')
 
 
-# Function to get target IPs from the database (same network by default, optional cross-network)
+# Function to get target IPs from the database (same network only)
 get_target_ips() {
     local db_file="$1"
     local current_ip="$2"
-    local include_cross_network="${3:-false}"  # Default to false
     
     if [ ! -f "$db_file" ]; then
         echo "Database file not found: $db_file" >&2
@@ -73,95 +75,172 @@ get_target_ips() {
     # Get current network segment
     local current_network=$(echo "$current_ip" | cut -d'.' -f1-3)
     
-    if [ "$include_cross_network" = "true" ]; then
-        # Get all devices except self (cross-network enabled)
-        echo "Note: Including devices from all networks" >&2
-        $SQLITE3 "$db_file" "SELECT local_ip_address FROM devices WHERE local_ip_address != '$current_ip';"
-    else
-        # Only get devices from the same network (default behavior)
-        $SQLITE3 "$db_file" "SELECT local_ip_address FROM devices WHERE local_ip_address != '$current_ip' AND wlan_network = '$current_network';"
-    fi
+    # Only get devices from the same network
+    $SQLITE3 "$db_file" "SELECT local_ip_address FROM devices WHERE local_ip_address != '$current_ip' AND wlan_network = '$current_network';"
 }
 
-# Function to check if a device is online
-is_device_online() {
+# Function to get device info for display
+get_device_info_for_display() {
+    local db_file="$1"
+    local current_ip="$2"
+    
+    if [ ! -f "$db_file" ]; then
+        echo "Database file not found: $db_file" >&2
+        exit 1
+    fi
+    
+    # Get current network segment
+    local current_network=$(echo "$current_ip" | cut -d'.' -f1-3)
+    
+    # Get devices from the same network with names
+    $SQLITE3 "$db_file" "SELECT local_ip_address || '|' || device_name FROM devices WHERE local_ip_address != '$current_ip' AND wlan_network = '$current_network';"
+}
+
+# We use is_device_online function from util_network_scan.sh
+# (no local definition needed since we source the utility file)
+
+# Wrapper functions for compatibility
+scan_network_for_devices() {
+    util_scan_network_for_devices "$CURRENT_IP" "$DB_FILE" "$ENVIRONMENT" "true"
+}
+
+check_device_online() {
     local ip="$1"
-    local timeout=3
-    
-    # Test ping first (quick connectivity check)
-    local ping_result=0
-    if [ "$ENVIRONMENT" = "msys" ] || [ "$ENVIRONMENT" = "linux" ]; then
-        # Windows ping syntax
-        ping_result=$(ping -n 1 -w 1000 "$ip" 2>/dev/null | grep -c "Reply from" 2>/dev/null)
-        # Ensure we have a valid number
-        if [ -z "$ping_result" ] || ! [[ "$ping_result" =~ ^[0-9]+$ ]]; then
-            ping_result=0
-        fi
-    else
-        # Linux/Termux ping syntax
-        if ping -c 1 -W 1 "$ip" >/dev/null 2>&1; then
-            ping_result=1
-        else
-            ping_result=0
-        fi
-    fi
-    
-    if [ "$ping_result" -eq 0 ]; then
-        return 1  # Device not reachable via ping
-    fi
-    
-    # Test LocalSync server API endpoint
-    local response=$($CURL -s --connect-timeout $timeout "http://$ip:3000/api/environment" 2>/dev/null)
-    if [ -n "$response" ] && echo "$response" | $JQ -e '.status == "success"' >/dev/null 2>&1; then
-        return 0  # Device is online and running LocalSync
-    else
-        return 1  # Device not running LocalSync or not responding
-    fi
+    is_device_online "$ip"
 }
 
-# Retrieve target IPs
-target_ips=$(get_target_ips "$DB_FILE" "$CURRENT_IP")
-if [ -z "$target_ips" ]; then
-    echo "No other devices found in the same network."
-    echo "Would you like to include devices from other networks? (y/n): "
-    read -r cross_network_choice
-    if [[ "$cross_network_choice" =~ ^[Yy]$ ]]; then
-        echo "Checking devices across all networks..."
-        target_ips=$(get_target_ips "$DB_FILE" "$CURRENT_IP" "true")
-        if [ -z "$target_ips" ]; then
-            echo "No other devices found in the database at all."
-            exit 1
-        fi
-    else
+refresh_device_status() {
+    util_refresh_device_status "$CURRENT_IP" "$DB_FILE"
+}
+
+# Check if this is a special database operation that doesn't need device checks
+if [ $# -gt 0 ] && [[ "$1" == "send_database" || "$1" == "receive_database" ]]; then
+    # For database operations, check if we have devices but don't exit if none found
+    target_ips=$(get_target_ips "$DB_FILE" "$CURRENT_IP")
+    if [ -z "$target_ips" ]; then
+        echo "No other devices found for database sync. Operation completed silently."
+        exit 0
+    fi
+else
+    # For other operations, require devices to be present
+    target_ips=$(get_target_ips "$DB_FILE" "$CURRENT_IP")
+    if [ -z "$target_ips" ]; then
+        echo "No other devices found in the same network."
         echo "Staying within current network. No devices found."
         exit 1
     fi
 fi
 
-# Filter online devices
-echo "Checking device availability..."
-online_ips=""
-total_devices=0
-online_devices=0
-
-for ip in $target_ips; do
-    total_devices=$((total_devices + 1))
-    echo -n "Checking $ip... "
+# Filter online devices (skip for database operations if no devices)
+if [ -z "$target_ips" ]; then
+    # No devices found, but we've already handled this case above
+    online_ips=""
+    online_devices=0
+    total_devices=0
+else
+    echo "Checking availability of known devices for sync operation..."
     
-    if is_device_online "$ip"; then
-        echo "Online"
-        online_ips="$online_ips $ip"
-        online_devices=$((online_devices + 1))
+    # Use the existing refresh function to get current device status
+    # This will update the database with real-time status
+    util_refresh_device_status "$CURRENT_IP" "$DB_FILE" 2>/dev/null
+    
+    # Now get the list of online devices from the updated database
+    current_network=$(echo "$CURRENT_IP" | cut -d'.' -f1-3)
+    target_ips=$($SQLITE3 "$DB_FILE" "SELECT local_ip_address FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network' AND availability_status = 'online';")
+    
+    if [ -n "$target_ips" ]; then
+        online_ips="$target_ips"
+        online_devices=$(echo "$target_ips" | wc -w)
+        total_devices=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network';" 2>/dev/null)
+        
+        echo "Device status: $online_devices/$total_devices devices are online"
+        
+        # Show which devices are online
+        for ip in $target_ips; do
+            device_name=$($SQLITE3 "$DB_FILE" "SELECT device_name FROM devices WHERE local_ip_address = '$ip';" 2>/dev/null)
+            echo "  → $device_name ($ip) is online"
+        done
     else
-        echo "Offline/Unreachable"
+        online_ips=""
+        online_devices=0
+        total_devices=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network';" 2>/dev/null)
+        echo "Device status: 0/$total_devices devices are online"
     fi
-done
+fi
 
-echo "Device status: $online_devices/$total_devices devices are online"
+# Handle case where no online devices are found
+if [ -z "$online_ips" ] && [ $# -gt 0 ] && [[ "$1" == "send_database" || "$1" == "receive_database" ]]; then
+    # For database operations, this is OK - just exit silently
+    echo "No online devices for database sync. Operation completed."
+    exit 0
+elif [ -z "$online_ips" ]; then
+    echo "No online devices found."
+    echo "Would you like to scan the network for new LocalSync devices? (y/n): "
+    read -r scan_choice
+    
+    if [[ "$scan_choice" =~ ^[Yy]$ ]]; then
+        echo "Starting network scan..."
+        scan_network_for_devices
+        scan_exit_code=$?
+        
+        if [ $scan_exit_code -gt 0 ]; then
+            echo "Found $scan_exit_code new device(s). Refreshing target list..."
+            
+            # Refresh target IPs after scan
+            target_ips=$(get_target_ips "$DB_FILE" "$CURRENT_IP")
+            
+            if [ -n "$target_ips" ]; then
+                echo "Re-checking availability of discovered devices for sync operation..."
+                
+                # Get device info for better display
+                device_info=$(get_device_info_for_display "$DB_FILE" "$CURRENT_IP")
+                
+                # Re-check online status
+                online_ips=""
+                online_devices=0
+                total_devices=0
+                
+                for ip in $target_ips; do
+                    total_devices=$((total_devices + 1))
+                    
+                    # Find device name for this IP
+                    device_name=$(echo "$device_info" | grep "^$ip|" | cut -d'|' -f2)
+                    if [ -z "$device_name" ]; then
+                        device_name="Unknown Device"
+                    fi
+                    
+                    echo -n "Checking $device_name ($ip): "
+                    if is_device_online "$ip"; then
+                        echo "Online"
+                        if [ -z "$online_ips" ]; then
+                            online_ips="$ip"
+                        else
+                            online_ips="$online_ips $ip"
+                        fi
+                        online_devices=$((online_devices + 1))
+                    else
+                        echo "Offline/Unreachable"
+                    fi
+                done
 
-if [ -z "$online_ips" ]; then
-    echo "No online devices found. Cannot proceed with sync operation."
-    exit 1
+                echo "Device status after scan: $online_devices/$total_devices devices are online"
+
+                if [ -z "$online_ips" ]; then
+                    echo "Still no online devices found after scan. Cannot proceed with sync operation."
+                    exit 1
+                fi
+            else
+                echo "No devices found even after scanning. Cannot proceed with sync operation."
+                exit 1
+            fi
+        else
+            echo "No new devices found during scan. Cannot proceed with sync operation."
+            exit 1
+        fi
+    else
+        echo "Network scan skipped. Cannot proceed with sync operation."
+        exit 1
+    fi
 fi
 
 # Update target_ips to only include online devices

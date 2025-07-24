@@ -182,6 +182,10 @@ PC_GEOMETRY_DASH_FOLDER = r'C:\Users\Vipxpert\AppData\Local\GeometryDash'
 MOBILE_GEOMETRY_DASH_FOLDER = '/storage/self/primary/Android/media/com.geode.launcher/save'
 MOBILE_GEOMETRY_DASH_FOLDER_ALT = '/storage/emulated/0/Android/media/com.geode.launcher/save'
 
+# Sort path variables for drag and drop file categorization
+ANDROID_SORT_PATH = '/storage/emulated/0/Download/Sort'
+PC_SORT_PATH = r'E:\Sort'
+
 # Allow access to these specific files
 EXCEPTION_PATHS = {
     'CCGameManager.dat': pathlib.Path(os.path.join(PC_GEOMETRY_DASH_FOLDER, 'CCGameManager.dat')).resolve(),
@@ -206,7 +210,14 @@ EXCEPTION_FOLDERS = {
     pathlib.Path(os.path.join(CURRENT_DIRECTORY, 'host')).resolve(),
     pathlib.Path(PC_GEOMETRY_DASH_FOLDER).resolve(),
     pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER).resolve(),
-    pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER_ALT).resolve()
+    pathlib.Path(MOBILE_GEOMETRY_DASH_FOLDER_ALT).resolve(),
+    # Add sort path base directories for security exceptions
+    pathlib.Path(ANDROID_SORT_PATH).resolve(),
+    pathlib.Path(PC_SORT_PATH).resolve(),
+    # Add download directories for regular drag-and-drop uploads
+    pathlib.Path('/storage/emulated/0/Download').resolve(),
+    pathlib.Path('E:/Download').resolve(),
+    pathlib.Path('C:/Users/Downloads').resolve()
 }
 
 
@@ -267,6 +278,44 @@ def parse_time(timestr):
     except Exception:
         return None
 
+
+def get_sort_path(filename, use_sort_paths=False):
+    """
+    Determines the appropriate sort path based on file extension and platform.
+    Returns the path where the file should be saved.
+    """
+    if not use_sort_paths:
+        return CURRENT_DIRECTORY
+    
+    # Determine platform-specific base sort path
+    if platform.system() == 'Windows':
+        base_sort_path = PC_SORT_PATH
+    else:
+        base_sort_path = ANDROID_SORT_PATH
+    
+    # Get file extension and determine category
+    file_ext = os.path.splitext(filename)[1].lower()
+    
+    # Define file categories based on extensions
+    if file_ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']:
+        category = 'Mp3'
+    elif file_ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm']:
+        category = 'Video'
+    elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
+        category = 'Images'
+    elif file_ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt']:
+        category = 'Documents'
+    elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+        category = 'Archives'
+    elif file_ext in ['.apk']:
+        category = 'Apps'
+    else:
+        category = 'Others'
+    
+    # Create full sort path
+    sort_path = os.path.join(base_sort_path, category)
+    return pathlib.Path(sort_path).resolve()
+
 @app.route('/files/mtime', methods=['GET'])
 def get_file_mtime():
     custom_path = request.args.get('custom_path', '')
@@ -292,10 +341,21 @@ def upload_single():
     if file.filename == '':
         return '[SERVER] No selected file. ', 400
 
+    # Check if sort paths should be used
+    use_sort_paths = request.args.get('use_sort_paths', '').lower() == 'true'
+    
     # Sanitize and decode the custom_path
     custom_path = request.args.get('custom_path') or ''
     file_name = os.path.basename(file.filename or '')  # Prevent path traversal
-    safe_path = is_safe_path(CURRENT_DIRECTORY, custom_path, file_name)
+    
+    # Determine save path based on sort paths or custom path
+    if use_sort_paths:
+        safe_path = get_sort_path(file_name, use_sort_paths=True)
+        # Ensure the directory exists since we're bypassing is_safe_path
+        os.makedirs(safe_path, exist_ok=True)
+    else:
+        safe_path = is_safe_path(CURRENT_DIRECTORY, custom_path, file_name)
+    
     save_path = os.path.join(safe_path, file_name)
 
     # Parse time parameter (prefer form, fallback to query)
@@ -313,7 +373,10 @@ def upload_single():
     os.makedirs(safe_path, exist_ok=True)
     file.save(save_path)
     print(f"[UPLOAD] File received: {file_name}")
-    print(f"[UPLOAD] Requested path: {custom_path}")
+    if use_sort_paths:
+        print(f"[UPLOAD] Using sort paths - saved to category folder")
+    else:
+        print(f"[UPLOAD] Requested path: {custom_path}")
     print(f"[UPLOAD] File saved to: {save_path}")
 
     if upload_time:

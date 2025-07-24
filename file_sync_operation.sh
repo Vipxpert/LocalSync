@@ -35,6 +35,9 @@ fi
 # Source network scanning utilities
 source "./util_network_scan.sh"
 
+# Initialize sort paths variable (can be overridden later)
+export use_sort_paths="false"
+
 # Determine current device IP
 if [ -n "$IFCONFIG" ] && command -v "$IFCONFIG" &>/dev/null; then
     CURRENT_IP=$("$IFCONFIG" | awk '
@@ -192,38 +195,24 @@ elif [ -z "$online_ips" ]; then
             if [ -n "$target_ips" ]; then
                 echo "Re-checking availability of discovered devices for sync operation..."
                 
-                # Get device info for better display
-                device_info=$(get_device_info_for_display "$DB_FILE" "$CURRENT_IP")
+                # Use util_refresh_device_status instead of manual checking
+                util_refresh_device_status "$CURRENT_IP" "$DB_FILE" 2>/dev/null
                 
-                # Re-check online status
-                online_ips=""
-                online_devices=0
-                total_devices=0
+                # Get updated online devices from database
+                current_network=$(echo "$CURRENT_IP" | cut -d'.' -f1-3)
+                online_target_ips=$($SQLITE3 "$DB_FILE" "SELECT local_ip_address FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network' AND availability_status = 'online';")
                 
-                for ip in $target_ips; do
-                    total_devices=$((total_devices + 1))
+                if [ -n "$online_target_ips" ]; then
+                    online_ips="$online_target_ips"
+                    online_devices=$(echo "$online_target_ips" | wc -w)
+                    total_devices=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network';" 2>/dev/null)
                     
-                    # Find device name for this IP
-                    device_name=$(echo "$device_info" | grep "^$ip|" | cut -d'|' -f2)
-                    if [ -z "$device_name" ]; then
-                        device_name="Unknown Device"
-                    fi
-                    
-                    echo -n "Checking $device_name ($ip): "
-                    if is_device_online "$ip"; then
-                        echo "Online"
-                        if [ -z "$online_ips" ]; then
-                            online_ips="$ip"
-                        else
-                            online_ips="$online_ips $ip"
-                        fi
-                        online_devices=$((online_devices + 1))
-                    else
-                        echo "Offline/Unreachable"
-                    fi
-                done
-
-                echo "Device status after scan: $online_devices/$total_devices devices are online"
+                    echo "Device status after scan: $online_devices/$total_devices devices are online"
+                else
+                    online_ips=""
+                    online_devices=0
+                    total_devices=$($SQLITE3 "$DB_FILE" "SELECT COUNT(*) FROM devices WHERE local_ip_address != '$CURRENT_IP' AND wlan_network = '$current_network';" 2>/dev/null)
+                fi
 
                 if [ -z "$online_ips" ]; then
                     echo "Still no online devices found after scan. Cannot proceed with sync operation."
@@ -339,8 +328,44 @@ process_file_path() {
             SERVER_ENVIRONMENT="unknown"
         fi
         
-        # Use util_send_files.sh to send the specific file
-        $BASH_CMD util_send_files.sh "$target_ip" "$ENVIRONMENT" "$SERVER_ENVIRONMENT" 0 "$normalized_dir_path" "$normalized_dir_path" "$file_name"
+        # Check if sort paths should be used
+        echo "Debug: use_sort_paths value is '$use_sort_paths'"
+        if [ "$use_sort_paths" = "true" ]; then
+            # Use direct curl command with sort paths enabled
+            echo "Using sort paths - file will be categorized automatically"
+            
+            # Get file modification time
+            if [ "$ENVIRONMENT" = "msys" ]; then
+                timestamp=$(stat -c %Y "$file_path" 2>/dev/null)
+            else
+                timestamp=$(stat -c %s "$file_path" 2>/dev/null)
+            fi
+            
+            if [ -z "$timestamp" ]; then
+                timestamp=$(date +%s)
+            fi
+            
+            # Upload with sort paths parameter
+            response=$($CURL -s -X POST \
+                -F "file=@$file_path" \
+                -F "time=$timestamp" \
+                "http://$target_ip:3000/upload/single?use_sort_paths=true")
+            
+            echo "Upload response: $response"
+        else
+            echo "Using regular upload (sort paths disabled or not set)"
+            # Use util_send_files.sh for regular upload
+            # Set appropriate destination paths based on server environment
+            if [ "$SERVER_ENVIRONMENT" = "android" ]; then
+                android_dest_path="/storage/emulated/0/Download"
+                windows_dest_path="$normalized_dir_path"
+            else
+                android_dest_path="$normalized_dir_path"
+                windows_dest_path="$normalized_dir_path"
+            fi
+            
+            $BASH_CMD util_send_files.sh "$target_ip" "$ENVIRONMENT" "$SERVER_ENVIRONMENT" 0 "$android_dest_path" "$windows_dest_path" "$file_name"
+        fi
     done
 }
 
@@ -398,6 +423,26 @@ if [ $# -gt 0 ]; then
     # Check if first argument looks like a path
     if is_path "$1"; then
         echo "Path mode detected. Processing $# path(s)..."
+        
+        # Ask user if they want to use sort paths for file organization
+        echo "Do you want to use sort paths to organize files by category?"
+        echo "  1. Yes - organize files into categories (Mp3, Video, Images, etc.)"
+        echo "  2. No - use original directory structure"
+        
+        read -p "Enter your choice (1-2): " sort_choice
+        
+        case "$sort_choice" in
+            1)
+                export use_sort_paths="true"
+                echo "Sort paths enabled - files will be organized by category."
+                echo "Debug: Global use_sort_paths set to '$use_sort_paths'"
+                ;;
+            2|*)
+                export use_sort_paths="false"
+                echo "Sort paths disabled - using original directory structure."
+                echo "Debug: Global use_sort_paths set to '$use_sort_paths'"
+                ;;
+        esac
         
         # Process all provided paths
         for path in "$@"; do
@@ -495,102 +540,180 @@ execute_operation() {
     fi
 }
 
-# Get operation
-if [ -n "$1" ]; then
-    operation="$1"
-    if ! validate_operation "$operation"; then
-        echo "Invalid operation: $operation"
+# Main function to handle file sync operations
+main_file_sync_menu() {
+    # Get operation
+    if [ -n "$1" ]; then
+        operation="$1"
+        if ! validate_operation "$operation"; then
+            echo "Invalid operation: $operation"
+            display_operations
+            echo "Please provide a valid operation name from the list above."
+            return 1
+        fi
+        echo "Selected operation: $operation"
+    else
         display_operations
-        echo "Please provide a valid operation name from the list above."
-        exit 1
-    fi
-    echo "Selected operation: $operation"
-else
-    display_operations
-    echo ""
-    echo "You can also paste file/folder path(s) instead of selecting a number."
-    echo "Multiple paths separated by space are supported."
-    read -r -p "Enter the number of the operation to run OR paste file/folder path(s): " choice
-    
-    # Check if the input looks like a path
-    if is_path "$choice"; then
-        echo "Path input detected. Processing..."
-        
-        # Parse multiple paths more safely
-        # Use a robust method that preserves backslashes and handles spaces
-        declare -a paths
-        
-        # Try the simplest approach first - direct assignment
-        if [[ "$choice" != *\"* ]]; then
-            # No quotes, try simple space splitting
-            IFS=' ' read -ra paths <<< "$choice"
-        else
-            # Has quotes, use eval
-            eval "paths=($choice)" 2>/dev/null || {
-                echo "Error parsing paths. Please check your input format."
-                exit 1
-            }
-        fi
-        
-        # Validate that we have at least one path
-        if [ ${#paths[@]} -eq 0 ]; then
-            echo "No valid paths found in input."
-            exit 1
-        fi
-        
-        echo "Found ${#paths[@]} path(s) to process:"
-        for path in "${paths[@]}"; do
-            echo "  - $path"
-        done
         echo ""
+        echo "You can also paste file/folder path(s) instead of selecting a number."
+        echo "Multiple paths separated by space are supported."
+        read -r -p "Enter the number of the operation to run OR paste file/folder path(s): " choice
         
-        # Process each path
-        for path in "${paths[@]}"; do
+        # Check if the input looks like a path
+        if is_path "$choice"; then
+            echo "Path input detected. Processing..."
+            
+            # Parse multiple paths more safely
+            # Use a robust method that preserves backslashes and handles spaces
+            declare -a paths
+            
+            # Try the simplest approach first - direct assignment
+            if [[ "$choice" != *\"* ]]; then
+                # No quotes, try simple space splitting
+                IFS=' ' read -ra paths <<< "$choice"
+            else
+                # Has quotes, use eval
+                eval "paths=($choice)" 2>/dev/null || {
+                    echo "Error parsing paths. Please check your input format."
+                    return 1
+                }
+            fi
+            
+            # Validate that we have at least one path
+            if [ ${#paths[@]} -eq 0 ]; then
+                echo "No valid paths found in input."
+                return 1
+            fi
+            
+            echo "Found ${#paths[@]} path(s) to process:"
+            for path in "${paths[@]}"; do
+                echo "  - $path"
+            done
+            echo ""
+            
+            # Ask user if they want to use sort paths for file organization
+            echo "Do you want to use sort paths to organize files by category?"
+            echo "  1. Yes - organize files into categories (Mp3, Video, Images, etc.)"
+            echo "  2. No - use original directory structure"
+            
+            read -p "Enter your choice (1-2): " sort_choice
+            
+            case "$sort_choice" in
+                1)
+                    export use_sort_paths="true"
+                    echo "Sort paths enabled - files will be organized by category."
+                    echo "Debug: Interactive use_sort_paths set to '$use_sort_paths'"
+                    ;;
+                2|*)
+                    export use_sort_paths="false"
+                    echo "Sort paths disabled - using original directory structure."
+                    echo "Debug: Interactive use_sort_paths set to '$use_sort_paths'"
+                    ;;
+            esac
+            
+            # Process each path
+            for path in "${paths[@]}"; do
+                process_path "$path"
+            done
+            
+            echo "All paths processed."
+            return 0
+        fi
+        
+        # Handle numeric choice (original behavior)
+        if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+            echo "Invalid input. Please enter a number or a valid file/folder path."
+            return 1
+        fi
+        
+        if [ "$choice" -lt 0 ] || [ "$choice" -gt "${#operations[@]}" ]; then
+            echo "Invalid choice. Please enter a number between 0 and ${#operations[@]}."
+            return 1
+        fi
+        if [ "$choice" -eq 0 ]; then
+            echo "Exiting..."
+            return 2  # Special exit code to signal main loop to exit
+        fi
+        IFS='|' read -r name _ <<<"${operations[$((choice - 1))]}"
+        operation="$name"
+        echo "Selected operation: $operation"
+    fi
+
+    echo "All online IPs queued: $target_ips"
+
+    # Loop through each online target IP and execute the operation
+    for target_ip in $target_ips; do
+        ip=$target_ip
+        # Skip if target IP is the same as current device IP (shouldn't happen, but safety check)
+        if [ "$ip" = "$CURRENT_IP" ]; then
+            echo "Skipping $ip (matches current device IP)"
+            continue
+        fi
+        
+        echo "Processing $ip..."
+        
+        # Get server environment (we know it's online, so this should work)
+        SERVER_ENVIRONMENT=$($CURL -s --connect-timeout 5 "http://$ip:3000/api/environment" | $JQ -r '.environment' 2>/dev/null)
+        if [ -z "$SERVER_ENVIRONMENT" ] || [ "$SERVER_ENVIRONMENT" = "null" ]; then
+            echo "Warning: Could not determine environment for IP $ip, using 'unknown'"
+            SERVER_ENVIRONMENT="unknown"
+        fi
+        
+        execute_operation "$operation" "$ip" "$SERVER_ENVIRONMENT"
+    done
+    
+    return 0
+}
+
+# Check if arguments are provided for direct execution
+if [ $# -gt 0 ]; then
+    # Check if first argument looks like a path for direct file processing
+    if is_path "$1"; then
+        echo "Path mode detected. Processing $# path(s)..."
+        
+        # Ask user if they want to use sort paths for file organization
+        echo "Do you want to use sort paths to organize files by category?"
+        echo "  1. Yes - organize files into categories (Mp3, Video, Images, etc.)"
+        echo "  2. No - use original directory structure"
+        
+        read -p "Enter your choice (1-2): " sort_choice
+        
+        case "$sort_choice" in
+            1)
+                export use_sort_paths="true"
+                echo "Sort paths enabled - files will be organized by category."
+                echo "Debug: Global use_sort_paths set to '$use_sort_paths'"
+                ;;
+            2|*)
+                export use_sort_paths="false"
+                echo "Sort paths disabled - using original directory structure."
+                echo "Debug: Global use_sort_paths set to '$use_sort_paths'"
+                ;;
+        esac
+        
+        # Process all provided paths
+        for path in "$@"; do
             process_path "$path"
         done
         
         echo "All paths processed."
         exit 0
+    else
+        # Direct operation execution (non-interactive mode)
+        main_file_sync_menu "$1"
+        exit $?
     fi
-    
-    # Handle numeric choice (original behavior)
-    if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-        echo "Invalid input. Please enter a number or a valid file/folder path."
-        exit 1
-    fi
-    
-    if [ "$choice" -lt 0 ] || [ "$choice" -gt "${#operations[@]}" ]; then
-        echo "Invalid choice. Please enter a number between 0 and ${#operations[@]}."
-        exit 1
-    fi
-    if [ "$choice" -eq 0 ]; then
-        echo "Exiting..."
-        exit 0
-    fi
-    IFS='|' read -r name _ <<<"${operations[$((choice - 1))]}"
-    operation="$name"
-    echo "Selected operation: $operation"
 fi
 
-echo "All online IPs queued: $target_ips"
-
-# Loop through each online target IP and execute the operation
-for target_ip in $target_ips; do
-    ip=$target_ip
-    # Skip if target IP is the same as current device IP (shouldn't happen, but safety check)
-    if [ "$ip" = "$CURRENT_IP" ]; then
-        echo "Skipping $ip (matches current device IP)"
-        continue
+# Interactive menu loop
+while true; do
+    echo ""
+    echo "=== LocalSync File Operations ==="
+    main_file_sync_menu
+    menu_result=$?
+    
+    # If user chose to exit (option 0), break the loop
+    if [ $menu_result -eq 2 ]; then
+        break
     fi
-    
-    echo "Processing $ip..."
-    
-    # Get server environment (we know it's online, so this should work)
-    SERVER_ENVIRONMENT=$($CURL -s --connect-timeout 5 "http://$ip:3000/api/environment" | $JQ -r '.environment' 2>/dev/null)
-    if [ -z "$SERVER_ENVIRONMENT" ] || [ "$SERVER_ENVIRONMENT" = "null" ]; then
-        echo "Warning: Could not determine environment for IP $ip, using 'unknown'"
-        SERVER_ENVIRONMENT="unknown"
-    fi
-    
-    execute_operation "$operation" "$ip" "$SERVER_ENVIRONMENT"
 done

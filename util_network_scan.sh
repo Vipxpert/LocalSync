@@ -14,15 +14,15 @@ get_device_identifier() {
     local ip="$1"
     
     # Try to get device identifier from the LocalSync server
-    local device_id=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_id" 2>/dev/null | $JQ -r '.id' 2>/dev/null)
+    local device_id=$($CURL -s --connect-timeout 1 "http://$ip:3000/get_device_id" 2>/dev/null | $JQ -r '.id' 2>/dev/null)
     if [ -n "$device_id" ] && [ "$device_id" != "null" ]; then
         echo "$device_id"
         return 0
     fi
     
     # Fallback: use device name + environment as identifier
-    local device_name=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
-    local environment=$($CURL -s --connect-timeout 3 "http://$ip:3000/api/environment" | $JQ -r '.environment' 2>/dev/null)
+    local device_name=$($CURL -s --connect-timeout 1 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
+    local environment=$($CURL -s --connect-timeout 1 "http://$ip:3000/api/environment" | $JQ -r '.environment' 2>/dev/null)
     
     if [ -n "$device_name" ] && [ "$device_name" != "null" ] && [ -n "$environment" ] && [ "$environment" != "null" ]; then
         echo "${device_name}_${environment}"
@@ -34,7 +34,7 @@ get_device_identifier() {
 # Function to check if a device is online and running LocalSync
 is_device_online() {
     local ip="$1"
-    local timeout="${2:-3}"  # Default timeout of 3 seconds
+    local timeout="${2:-1}"  # Default timeout of 1 second
     
     # Skip ping entirely - go straight to LocalSync check
     # Many devices block ping but allow HTTP, so this is more reliable
@@ -77,7 +77,7 @@ util_scan_network_for_devices() {
     
     # Method 1: Try zeroconf discovery first (fast)
     echo "Checking for zeroconf-discovered devices..."
-    local zeroconf_response=$($CURL -s --connect-timeout 3 "http://$current_ip:3000/api/discover_services" 2>/dev/null)
+    local zeroconf_response=$($CURL -s --connect-timeout 1 "http://$current_ip:3000/api/discover_services" 2>/dev/null)
     if [ $? -eq 0 ] && echo "$zeroconf_response" | $JQ -e '.status == "success"' >/dev/null 2>&1; then
         local services=$(echo "$zeroconf_response" | $JQ -r '.services[]? | "\(.host)|\(.name)"' 2>/dev/null)
         if [ -n "$services" ]; then
@@ -87,7 +87,7 @@ util_scan_network_for_devices() {
                     echo "Found LocalSync device at: $ip ($name)"
                     
                     # Verify device is still responding
-                    local response=$($CURL -s --connect-timeout 2 "http://$ip:3000/api/environment" 2>/dev/null)
+                    local response=$($CURL -s --connect-timeout 1 "http://$ip:3000/api/environment" 2>/dev/null)
                     if echo "$response" | $JQ -e '.status == "success"' >/dev/null 2>&1; then
                         # Check if device already exists in database
                         local exists_by_ip=$($SQLITE3 "$db_file" "SELECT COUNT(*) FROM devices WHERE local_ip_address='$ip';" 2>/dev/null)
@@ -97,12 +97,12 @@ util_scan_network_for_devices() {
                         
                         if [ "$exists_by_ip" -eq 0 ]; then
                             # Add new device
-                            local device_name=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
+                            local device_name=$($CURL -s --connect-timeout 1 "http://$ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
                             if [ -z "$device_name" ] || [ "$device_name" = "null" ]; then
                                 device_name="$name"
                             fi
                             
-                            local server_path=$($CURL -s --connect-timeout 3 "http://$ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
+                            local server_path=$($CURL -s --connect-timeout 1 "http://$ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
                             if [ -z "$server_path" ] || [ "$server_path" = "null" ]; then
                                 server_path="/"
                             fi
@@ -157,7 +157,7 @@ util_scan_network_for_devices() {
             echo -n "Scanning $target_ip... "
             
             # Use the same device online check function for consistency
-            if is_device_online "$target_ip" 3; then
+            if is_device_online "$target_ip" 1; then
                 echo "LocalSync device found!"
                 
                 # (Add device logic same as above...)
@@ -167,12 +167,12 @@ util_scan_network_for_devices() {
                 fi
                 
                 if [ "$exists_by_ip" -eq 0 ]; then
-                    local device_name=$($CURL -s --connect-timeout 3 "http://$target_ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
+                    local device_name=$($CURL -s --connect-timeout 1 "http://$target_ip:3000/get_device_name" | $JQ -r '.name' 2>/dev/null)
                     if [ -z "$device_name" ] || [ "$device_name" = "null" ]; then
                         device_name="LocalSync Device"
                     fi
                     
-                    local server_path=$($CURL -s --connect-timeout 3 "http://$target_ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
+                    local server_path=$($CURL -s --connect-timeout 1 "http://$target_ip:3000/get_directory" | $JQ -r '.directory' 2>/dev/null)
                     if [ -z "$server_path" ] || [ "$server_path" = "null" ]; then
                         server_path="/"
                     fi
@@ -223,7 +223,7 @@ util_scan_network_for_devices() {
                     echo -n "Scanning $target_ip... "
                     
                     # Use the same device online check function for consistency
-                    if is_device_online "$target_ip" 3; then
+                    if is_device_online "$target_ip" 1; then
                         echo "LocalSync device found!"
                         
                         # Check if device already exists
@@ -381,6 +381,77 @@ util_refresh_device_status() {
     
     echo "Status refresh completed for devices in network $current_network.x"
     echo "Checked $checked_count device(s), found $online_count online"
+    
+    # Remove duplicate offline devices on the same network
+    echo "Checking for duplicate offline devices..."
+    
+    # Get device names that have duplicates on the current network
+    local duplicate_names=$($SQLITE3 "$db_file" "
+        SELECT device_name 
+        FROM devices 
+        WHERE wlan_network = '$current_network' 
+        AND local_ip_address != '$current_ip'
+        GROUP BY device_name 
+        HAVING COUNT(*) > 1;
+    " 2>/dev/null)
+    
+    if [ -n "$duplicate_names" ]; then
+        local removed_count=0
+        while IFS= read -r device_name; do
+            if [ -n "$device_name" ]; then
+                # Check if ALL devices with this name on this network are offline
+                local total_devices=$($SQLITE3 "$db_file" "
+                    SELECT COUNT(*) 
+                    FROM devices 
+                    WHERE device_name = '$device_name' 
+                    AND wlan_network = '$current_network' 
+                    AND local_ip_address != '$current_ip';
+                " 2>/dev/null)
+                
+                local offline_devices=$($SQLITE3 "$db_file" "
+                    SELECT COUNT(*) 
+                    FROM devices 
+                    WHERE device_name = '$device_name' 
+                    AND wlan_network = '$current_network' 
+                    AND local_ip_address != '$current_ip' 
+                    AND availability_status = 'offline';
+                " 2>/dev/null)
+                
+                if [ -n "$total_devices" ] && [ -n "$offline_devices" ] && [ "$total_devices" -gt 1 ] && [ "$offline_devices" -lt "$total_devices" ]; then
+                    # Some devices are online, so we can safely remove the offline duplicates
+                    echo "  → Removing offline duplicates for '$device_name' (keeping online devices)"
+                    
+                    # Get the IDs of offline duplicate devices (keep the most recent one)
+                    local offline_ids=$($SQLITE3 "$db_file" "
+                        SELECT id 
+                        FROM devices 
+                        WHERE device_name = '$device_name' 
+                        AND wlan_network = '$current_network' 
+                        AND local_ip_address != '$current_ip' 
+                        AND availability_status = 'offline'
+                        ORDER BY last_seen DESC 
+                        LIMIT -1 OFFSET 1;
+                    " 2>/dev/null)
+                    
+                    if [ -n "$offline_ids" ]; then
+                        while IFS= read -r device_id; do
+                            if [ -n "$device_id" ]; then
+                                $SQLITE3 "$db_file" "DELETE FROM devices WHERE id = '$device_id';" 2>/dev/null
+                                removed_count=$((removed_count + 1))
+                            fi
+                        done <<< "$offline_ids"
+                    fi
+                elif [ -n "$total_devices" ] && [ -n "$offline_devices" ] && [ "$total_devices" -gt 1 ] && [ "$offline_devices" -eq "$total_devices" ]; then
+                    # All devices with this name are offline - keep them all since we can't determine which is real
+                    echo "  → Keeping all offline duplicates for '$device_name' (all offline, cannot determine real device)"
+                fi
+            fi
+        done <<< "$duplicate_names"
+        
+        if [ $removed_count -gt 0 ]; then
+            echo "Removed $removed_count duplicate offline device(s)"
+        fi
+    fi
     
     # Also mark devices from other networks as offline since we can't reach them
     echo "Marking devices from other networks as offline..."

@@ -289,7 +289,6 @@ list_devices() {
     "
     
     echo ""
-    echo "Note: 'db_status' shows the last recorded status in the database."
     echo "Use option 7 (Refresh status) to update with real-time device availability."
 }
 
